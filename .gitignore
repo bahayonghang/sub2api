@@ -56,6 +56,9 @@ pnpm-debug.log*
 !.env.example
 docker-compose.override.yml
 
+# 本机实例运行目录：.env、data、postgres_data、redis_data
+/local-deploy/
+
 # ===================
 # IDE / 编辑器
 # ===================

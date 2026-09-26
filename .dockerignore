@@ -73,6 +73,9 @@ deploy/data/
 deploy/postgres_data/
 deploy/redis_data/
 
+# 本机实例运行目录，含密钥和数据库，不能进入构建上下文
+/local-deploy/
+
 # GoReleaser
 .goreleaser.yaml
 
