@@ -1,0 +1,71 @@
+[
+  {
+    "case": "attachment_upload",
+    "http_status": 200,
+    "file_id_present": true,
+    "response_fields": [
+      "content_type",
+      "filename",
+      "input_tokens",
+      "openai_file_id",
+      "size"
+    ],
+    "content_type": "image/png",
+    "size": 399
+  },
+  {
+    "case": "uploaded_user_png_auto",
+    "account_id": 1,
+    "model": "gpt-6-astra",
+    "transport": "BPS",
+    "time_utc": "2026-09-26T05:24:33Z",
+    "http_status": 200,
+    "terminal_event": "response.completed",
+    "response_status": "completed",
+    "answer": "Red, blue",
+    "expected_answer": "red, blue"
+  },
+  {
+    "case": "uploaded_user_png_high",
+    "account_id": 1,
+    "model": "gpt-6-astra",
+    "transport": "BPS",
+    "time_utc": "2026-09-26T05:24:36Z",
+    "http_status": 200,
+    "terminal_event": "response.completed",
+    "response_status": "completed",
+    "answer": "Red, Blue",
+    "expected_answer": "red, blue"
+  },
+  {
+    "case": "uploaded_user_png_original",
+    "account_id": 1,
+    "model": "gpt-6-astra",
+    "transport": "BPS",
+    "time_utc": "2026-09-26T05:24:39Z",
+    "http_status": 200,
+    "terminal_event": "response.completed",
+    "response_status": "completed",
+    "answer": "Red, blue",
+    "expected_answer": "red, blue"
+  },
+  {
+    "case": "uploaded_tool_png",
+    "account_id": 1,
+    "model": "gpt-6-astra",
+    "transport": "BPS",
+    "time_utc": "2026-09-26T05:24:42Z",
+    "http_status": 422,
+    "error": {
+      "message": "422: Invalid request body.",
+      "type": "server_error",
+      "param": null,
+      "code": null
+    },
+    "expected_answer": "red, blue"
+  },
+  {
+    "case": "attachment_cleanup",
+    "http_status": 200
+  }
+]

@@ -772,6 +772,54 @@ describe("admin SettingsView payment visible method controls", () => {
     wrapper.unmount();
   });
 
+  it("saves Excel BPS image capacity without a public relay", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    const tab = wrapper.findAll('button').find((node) => node.text().includes('admin.settings.tabs.features'));
+    await tab?.trigger('click');
+    const card = wrapper.get('[data-testid="excel-bps-image-settings"]');
+    expect(card.find('#excel-bps-image-base-url').exists()).toBe(false);
+    expect(card.text()).toContain('admin.settings.features.excelBpsImages.imageLimitsHint');
+    expect(card.text()).toContain('admin.settings.features.excelBpsImages.capacityHint');
+    expect(card.text()).not.toContain('admin.settings.features.excelBpsImages.retentionHint');
+    for (const [selector, value] of [
+      ['#excel-bps-image-body-limit', '32'],
+      ['#excel-bps-image-budget', '768'],
+      ['#excel-bps-image-max-requests', '48'],
+    ]) {
+      expect(card.get(selector).isVisible()).toBe(true);
+      await card.get(selector).setValue(value);
+    }
+    await wrapper.find('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({
+      excel_bps_image_relay_enabled: false,
+      excel_bps_image_base_url: '',
+      excel_bps_image_body_limit_mib: 32,
+      excel_bps_image_budget_mib: 768,
+      excel_bps_image_max_requests: 48,
+    });
+    expect(showError).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("documents default local images and optional public relay in both locales", () => {
+    const zh = zhSettings.settings.features.excelBpsImages;
+    const en = enSettings.settings.features.excelBpsImages;
+    expect(zh.description).toContain('无需配置公网地址');
+    expect(en.description).toContain('without a public URL');
+    expect(zh.enabled).toContain('可选');
+    expect(en.enabled).toContain('optional');
+    expect(zh.capacityHint).toContain('关闭公网中转');
+    expect(en.capacityHint).toContain('public relay is disabled');
+    expect(zh.capacityHint).toContain('纯文本');
+    expect(en.capacityHint).toContain('text-only');
+    for (const messages of [zh, en]) {
+      expect(messages.capacityHint).toContain('OpenAI/Composite');
+      expect(messages.capacityHint).toContain('WebSocket');
+    }
+  });
+
   it("saves Excel BPS image relay from the feature switches tab", async () => {
     const wrapper = mountView();
     await flushPromises();
@@ -809,6 +857,10 @@ describe("admin SettingsView payment visible method controls", () => {
     expect((wrapper.get('#excel-bps-image-budget').element as HTMLInputElement).value).toBe('896');
     expect((wrapper.get('#excel-bps-image-max-requests').element as HTMLInputElement).value).toBe('40');
     await wrapper.get('#excel-bps-image-enabled').setValue(false);
+    expect(wrapper.find('#excel-bps-image-base-url').exists()).toBe(false);
+    expect((wrapper.get('#excel-bps-image-body-limit').element as HTMLInputElement).value).toBe('24');
+    expect((wrapper.get('#excel-bps-image-budget').element as HTMLInputElement).value).toBe('896');
+    expect((wrapper.get('#excel-bps-image-max-requests').element as HTMLInputElement).value).toBe('40');
     await wrapper.find('form').trigger('submit.prevent');
     await flushPromises();
     expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({ excel_bps_image_relay_enabled: false, excel_bps_image_base_url: 'https://saved.example', excel_bps_image_body_limit_mib: 24, excel_bps_image_budget_mib: 896, excel_bps_image_max_requests: 40 });
@@ -829,11 +881,25 @@ describe("admin SettingsView payment visible method controls", () => {
     wrapper.unmount();
   });
 
-  it("rejects out-of-range image relay capacity before saving", async () => {
+  it("validates a saved Excel BPS image origin while the public relay is disabled", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, excel_bps_image_base_url: 'http://images.example' });
     const wrapper = mountView();
     await flushPromises();
-    await wrapper.get('#excel-bps-image-enabled').setValue(true);
-    await wrapper.get('#excel-bps-image-base-url').setValue('https://images.example');
+    expect(wrapper.find('#excel-bps-image-base-url').exists()).toBe(false);
+    await wrapper.find('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenLastCalledWith('admin.settings.features.excelBpsImages.invalidBaseUrl');
+    wrapper.unmount();
+  });
+
+  it.each([false, true])("rejects out-of-range image capacity with public relay enabled=%s", async (enabled) => {
+    const wrapper = mountView();
+    await flushPromises();
+    if (enabled) {
+      await wrapper.get('#excel-bps-image-enabled').setValue(true);
+      await wrapper.get('#excel-bps-image-base-url').setValue('https://images.example');
+    }
     for (const [selector, value] of [
       ['#excel-bps-image-body-limit', '129'],
       ['#excel-bps-image-budget', '511'],

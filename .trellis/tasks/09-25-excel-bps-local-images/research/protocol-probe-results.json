@@ -1,0 +1,53 @@
+[
+  {
+    "case": "text_control",
+    "account_id": 1,
+    "model": "gpt-6-astra",
+    "transport": "BPS",
+    "time_utc": "2026-09-26T05:19:54Z",
+    "http_status": 200,
+    "terminal_event": "response.completed",
+    "response_status": "completed",
+    "answer": "BPS_IMAGE_CONTROL_OK"
+  },
+  {
+    "case": "user_inline_png",
+    "account_id": 1,
+    "model": "gpt-6-astra",
+    "transport": "BPS",
+    "time_utc": "2026-09-26T05:19:57Z",
+    "http_status": 422,
+    "error": {
+      "message": "422: Invalid request body.",
+      "type": "server_error",
+      "param": null,
+      "code": null
+    },
+    "expected_answer": "red, blue"
+  },
+  {
+    "case": "user_https_control",
+    "account_id": 1,
+    "model": "gpt-6-astra",
+    "transport": "BPS",
+    "time_utc": "2026-09-26T05:21:05Z",
+    "http_status": 400,
+    "error": {
+      "message": "Error while downloading file. Upstream status code: 400.",
+      "type": "invalid_request_error",
+      "param": "url",
+      "code": "invalid_value"
+    }
+  },
+  {
+    "case": "user_https_official_doc_example",
+    "account_id": 1,
+    "model": "gpt-6-astra",
+    "transport": "BPS",
+    "time_utc": "2026-09-26T05:21:39Z",
+    "http_status": 200,
+    "terminal_event": "response.completed",
+    "response_status": "completed",
+    "answer": "The painting shows a young woman seated in a dark wooden armchair. She wears a red-and-blue striped blouse, a blue skirt with orange dots, and a red ribbon in her dark hair. A small bouquet rests in her lap against a pale green background."
+  }
+]

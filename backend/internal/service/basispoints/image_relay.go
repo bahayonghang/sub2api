@@ -8,12 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 	"io"
-	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,8 +17,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	_ "golang.org/x/image/webp"
 )
 
 var (
@@ -201,38 +194,38 @@ func (r *ImageRelay) Rewrite(raw []byte, scope string) ([]byte, error) {
 		}
 	}()
 	totalBytes := 0
-	for _, rawItem := range input {
+	for inputIndex, rawItem := range input {
 		item, _ := rawItem.(object)
 		for _, field := range []string{"content", "output"} {
 			if field == "output" && text(item["type"]) != "function_call_output" && text(item["type"]) != "custom_tool_call_output" {
 				continue
 			}
 			parts, _ := item[field].([]any)
-			for _, rawPart := range parts {
+			for index, rawPart := range parts {
 				part, _ := rawPart.(object)
 				if text(part["type"]) != "input_image" {
 					continue
 				}
 				rawURL := text(part["image_url"])
-				if len(rawURL) < len("data:") || !strings.EqualFold(rawURL[:len("data:")], "data:") {
+				if !isInlineImage(rawURL) {
 					continue
 				}
 				if len(staged) >= imageRelayMaxRequestImages {
-					return nil, fmt.Errorf("basispoints accepts at most 20 inline images per request")
+					return nil, fmt.Errorf("basispoints accepts at most 20 inline images per request (path=input[%d].%s[%d])", inputIndex, field, index)
+				}
+				if err := validateImage(part); err != nil {
+					return nil, fmt.Errorf("%w (path=input[%d].%s[%d])", err, inputIndex, field, index)
 				}
 				img, token, err := r.storeImage(rawURL, scope)
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("%w (path=input[%d].%s[%d])", err, inputIndex, field, index)
 				}
 				staged = append(staged, img)
 				totalBytes += img.size
 				if totalBytes > imageRelayMaxRequestBytes {
-					return nil, fmt.Errorf("basispoints inline images exceed the 32 MiB request limit")
+					return nil, fmt.Errorf("basispoints inline images exceed the 32 MiB request limit (path=input[%d].%s[%d])", inputIndex, field, index)
 				}
 				part["image_url"] = baseURL + ImageRelayPath + token
-				if err := validateImage(part); err != nil {
-					return nil, err
-				}
 				images[token] = img
 			}
 		}
@@ -266,31 +259,8 @@ func (r *ImageRelay) Rewrite(raw []byte, scope string) ([]byte, error) {
 	return out, nil
 }
 
-func relayImagePayload(raw string) (string, string, error) {
-	header, payload, ok := strings.Cut(raw[len("data:"):], ",")
-	if !ok || !strings.HasSuffix(strings.ToLower(header), ";base64") {
-		return "", "", fmt.Errorf("basispoints inline image requires a base64 image data URL")
-	}
-	declared, params, err := mime.ParseMediaType(header[:len(header)-len(";base64")])
-	if err != nil || len(params) != 0 {
-		return "", "", fmt.Errorf("basispoints inline image has an invalid media type")
-	}
-	switch declared {
-	case "image/png", "image/jpeg", "image/gif", "image/webp":
-	default:
-		return "", "", fmt.Errorf("basispoints inline images must be PNG, JPEG, GIF or WebP")
-	}
-	if len(payload) > base64.StdEncoding.EncodedLen(imageRelayMaxImageBytes) {
-		return "", "", fmt.Errorf("basispoints inline image exceeds the 20 MiB limit")
-	}
-	if payload == "" {
-		return "", "", fmt.Errorf("basispoints inline image contains invalid base64 data")
-	}
-	return declared, payload, nil
-}
-
 func (r *ImageRelay) storeImage(raw, scope string) (*relayImage, string, error) {
-	declared, payload, err := relayImagePayload(raw)
+	declared, payload, err := inlineImagePayload(raw)
 	if err != nil {
 		return nil, "", err
 	}
@@ -344,12 +314,8 @@ func (r *ImageRelay) storeImage(raw, scope string) (*relayImage, string, error) 
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return nil, "", ErrImageRelayStorage
 	}
-	dimensions, format, err := image.DecodeConfig(file)
-	if err != nil || dimensions.Width <= 0 || dimensions.Height <= 0 || int64(dimensions.Width)*int64(dimensions.Height) > imageRelayMaxPixels {
-		return nil, "", fmt.Errorf("basispoints inline image is invalid or exceeds 64 megapixels")
-	}
-	if "image/"+format != declared {
-		return nil, "", fmt.Errorf("basispoints inline image media type does not match its contents")
+	if err := validateInlineImage(file, declared); err != nil {
+		return nil, "", err
 	}
 	if err := file.Close(); err != nil {
 		return nil, "", ErrImageRelayStorage

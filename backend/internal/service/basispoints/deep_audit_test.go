@@ -105,7 +105,7 @@ func TestDeepAuditImageInToolResultValidated(t *testing.T) {
 	}}
 	raw, _ := json.Marshal(source)
 	_, _, err = Prepare(raw, bridge.scope, cache)
-	if err == nil || !strings.Contains(err.Error(), "does not accept data:image") {
-		t.Fatalf("tool result image must have the same HTTPS requirement as user content: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "inline image is invalid") {
+		t.Fatalf("tool result image bytes must be validated: %v", err)
 	}
 }

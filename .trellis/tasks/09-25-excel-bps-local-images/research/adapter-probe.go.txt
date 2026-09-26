@@ -1,0 +1,148 @@
+package service
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"image"
+	"image/color"
+	"image/png"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
+)
+
+type liveImageUpstream struct {
+	client   *http.Client
+	statuses map[string][]int
+}
+
+func (u *liveImageUpstream) Do(req *http.Request, proxy string, accountID int64, concurrency int) (*http.Response, error) {
+	if req.URL.Scheme != "https" || req.URL.Host != "bps.openai.com" || proxy != "" {
+		return nil, errors.New("unexpected live probe destination")
+	}
+	op := "responses"
+	if req.URL.Path == "/basispoints/api/attachments" {
+		op = "upload"
+	}
+	if strings.HasPrefix(req.URL.Path, "/basispoints/api/attachments/delete/") {
+		op = "delete"
+	}
+	resp, err := u.client.Do(req)
+	if err != nil {
+		return nil, errors.New("live probe transport failed")
+	}
+	u.statuses[op] = append(u.statuses[op], resp.StatusCode)
+	return resp, nil
+}
+func (u *liveImageUpstream) DoWithTLS(req *http.Request, proxy string, accountID int64, concurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
+	return nil, errors.New("unexpected TLS transport in BPS probe")
+}
+
+func TestExcelBPSLiveLocalImageProbe(t *testing.T) {
+	raw := os.Getenv("SUB2API_BPS_LIVE_ACCOUNT")
+	if raw == "" {
+		t.Skip("opt-in synthetic BPS integration probe")
+	}
+	var selected struct {
+		ID          int64          `json:"id"`
+		Credentials map[string]any `json:"credentials"`
+		Extra       map[string]any `json:"extra"`
+		Model       string         `json:"upstream_model"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(raw), &selected))
+	require.NotEmpty(t, selected.Model)
+	account := excelAccount()
+	account.ID, account.Credentials, account.Extra = selected.ID, selected.Credentials, selected.Extra
+	gin.SetMode(gin.TestMode)
+	canvas := image.NewRGBA(image.Rect(0, 0, 128, 128))
+	for y := 0; y < 128; y++ {
+		for x := 0; x < 128; x++ {
+			pixel := color.RGBA{20, 40, 220, 255}
+			if x < 64 {
+				pixel = color.RGBA{220, 20, 20, 255}
+			}
+			canvas.SetRGBA(x, y, pixel)
+		}
+	}
+	var encoded bytes.Buffer
+	require.NoError(t, png.Encode(&encoded, canvas))
+	uri := "data:image/png;base64," + base64.StdEncoding.EncodeToString(encoded.Bytes())
+	content := []any{map[string]any{"type": "input_text", "text": "Name the dominant color in the LEFT half and then the RIGHT half of the image. Reply with only two English color names separated by a comma."}, map[string]any{"type": "input_image", "image_url": uri, "detail": "original"}}
+	user := map[string]any{"type": "message", "role": "user", "content": content}
+	toolInput := []any{
+		map[string]any{"type": "message", "role": "user", "content": "Inspect the returned image. Name the dominant color in the LEFT half and then the RIGHT half. Reply with only two English color names separated by a comma."},
+		map[string]any{"type": "function_call", "id": "fc_probe", "call_id": "call_probe", "name": "inspect_image", "arguments": "{}", "status": "completed"},
+		map[string]any{"type": "function_call_output", "id": "fc_output_probe", "call_id": "call_probe", "output": []any{map[string]any{"type": "input_text", "text": "Synthetic image"}, map[string]any{"type": "input_image", "image_url": uri, "detail": "original"}}},
+	}
+	tools := []any{map[string]any{"type": "function", "name": "inspect_image", "description": "Return an image", "parameters": map[string]any{"type": "object", "properties": map[string]any{}}}}
+	for _, tc := range []struct {
+		name    string
+		input   []any
+		stream  bool
+		uploads int
+	}{
+		{"user_image", []any{user}, false, 1},
+		{"tool_image_stream", toolInput, true, 0},
+		{"user_history", []any{user, map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "Red, blue"}}}, map[string]any{"type": "message", "role": "user", "content": "Read the earlier image again. Name its left and right colors, using only two English color names."}}, false, 1},
+		{"tool_history", append(append([]any{}, toolInput...), map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "Red, blue"}}}, map[string]any{"type": "message", "role": "user", "content": "Read the tool image again. Name its left and right colors, using only two English color names."}), false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := &liveImageUpstream{client: &http.Client{Timeout: 120 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, statuses: map[string][]int{}}
+			svc := openAIClientToolsTestService(nil)
+			svc.httpUpstream = upstream
+			defer svc.CloseExcelBPSImages()
+			body, err := json.Marshal(map[string]any{"model": selected.Model, "stream": tc.stream, "reasoning": map[string]any{"effort": "low"}, "input": tc.input, "tools": tools, "tool_choice": "none", "prompt_cache_key": "bps-live-" + tc.name + "-" + time.Now().UTC().Format("20060102T150405.000000000")})
+			require.NoError(t, err)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+			defer cancel()
+			result, err := svc.Forward(ctx, c, account, body)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, "response.completed", result.UpstreamTerminalEvent)
+			require.Equal(t, selected.Model, result.UpstreamModel)
+			require.Equal(t, 200, rec.Code)
+			response := rec.Body.Bytes()
+			if tc.stream {
+				for _, line := range strings.Split(rec.Body.String(), "\n") {
+					if strings.HasPrefix(line, "data: ") && gjson.Get(strings.TrimPrefix(line, "data: "), "type").String() == "response.completed" {
+						response = []byte(gjson.Get(strings.TrimPrefix(line, "data: "), "response").Raw)
+					}
+				}
+			}
+			answer := ""
+			for _, item := range gjson.GetBytes(response, "output").Array() {
+				for _, part := range item.Get("content").Array() {
+					if part.Get("type").String() == "output_text" {
+						answer += part.Get("text").String()
+					}
+				}
+			}
+			lower := strings.ToLower(answer)
+			require.True(t, strings.Contains(lower, "red") && strings.Contains(lower, "blue"), "unexpected synthetic color answer")
+			require.Len(t, upstream.statuses["upload"], tc.uploads)
+			require.Len(t, upstream.statuses["delete"], tc.uploads)
+			for _, statuses := range upstream.statuses {
+				for _, status := range statuses {
+					require.GreaterOrEqual(t, status, 200)
+					require.Less(t, status, 300)
+				}
+			}
+			report, _ := json.Marshal(map[string]any{"case": tc.name, "model": result.UpstreamModel, "terminal": result.UpstreamTerminalEvent, "http_status": rec.Code, "answer": answer, "upstream_statuses": upstream.statuses})
+			t.Log("BPS_ADAPTER_RESULT " + string(report))
+		})
+	}
+}

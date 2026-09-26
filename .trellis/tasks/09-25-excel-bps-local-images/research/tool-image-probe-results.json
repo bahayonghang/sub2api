@@ -1,0 +1,61 @@
+[
+  {
+    "case": "tool_text_array_control",
+    "account_id": 1,
+    "model": "gpt-6-astra",
+    "transport": "BPS",
+    "time_utc": "2026-09-26T05:25:25Z",
+    "http_status": 200,
+    "terminal_event": "response.completed",
+    "response_status": "completed",
+    "answer": "BPS_TOOL_CONTROL_OK"
+  },
+  {
+    "case": "tool_inline_png_auto",
+    "account_id": 1,
+    "model": "gpt-6-astra",
+    "transport": "BPS",
+    "time_utc": "2026-09-26T05:25:28Z",
+    "http_status": 200,
+    "terminal_event": "response.completed",
+    "response_status": "completed",
+    "answer": "Red, blue",
+    "expected_answer": "red, blue"
+  },
+  {
+    "case": "tool_inline_history_png",
+    "account_id": 1,
+    "model": "gpt-6-astra",
+    "transport": "BPS",
+    "time_utc": "2026-09-26T05:25:30Z",
+    "http_status": 200,
+    "terminal_event": "response.completed",
+    "response_status": "completed",
+    "answer": "Blue",
+    "expected_answer": "blue"
+  },
+  {
+    "case": "tool_inline_png_high",
+    "account_id": 1,
+    "model": "gpt-6-astra",
+    "transport": "BPS",
+    "time_utc": "2026-09-26T05:25:33Z",
+    "http_status": 200,
+    "terminal_event": "response.completed",
+    "response_status": "completed",
+    "answer": "Red, blue",
+    "expected_answer": "red, blue"
+  },
+  {
+    "case": "tool_inline_png_original",
+    "account_id": 1,
+    "model": "gpt-6-astra",
+    "transport": "BPS",
+    "time_utc": "2026-09-26T05:25:35Z",
+    "http_status": 200,
+    "terminal_event": "response.completed",
+    "response_status": "completed",
+    "answer": "Red, blue",
+    "expected_answer": "red, blue"
+  }
+]

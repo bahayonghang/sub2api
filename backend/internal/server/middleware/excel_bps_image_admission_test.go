@@ -66,6 +66,8 @@ func TestExcelBPSImageAdmission200ConcurrentRequests(t *testing.T) {
 	}{
 		{"default small", 1024, "", 128, bpsImageTestSettings{enabled: true}},
 		{"default large", 32 << 20, "", 4, bpsImageTestSettings{enabled: true}},
+		{"relay disabled small", 1024, "", 128, bpsImageTestSettings{}},
+		{"relay disabled large", 32 << 20, "", 4, bpsImageTestSettings{}},
 		{"scaled small", 1024, "", 128, bpsImageTestSettings{enabled: true, maxRequests: 128, budgetMiB: 512}},
 		{"scaled large", 32 << 20, "", 4, bpsImageTestSettings{enabled: true, maxRequests: 128, budgetMiB: 512}},
 		{"larger configured budget", 32 << 20, "", 8, bpsImageTestSettings{enabled: true, maxRequests: 128, budgetMiB: 2048}},
@@ -178,7 +180,7 @@ func TestExcelBPSImageAdmissionSmallBodyDoesNotHoldWorstCaseBudget(t *testing.T)
 			release := make(chan struct{})
 			var once sync.Once
 			t.Cleanup(func() { once.Do(func() { close(release) }) })
-			r := bpsImageTestRouter(bpsImageTestSettings{enabled: true}, func(c *gin.Context) {
+			r := bpsImageTestRouter(bpsImageTestSettings{}, func(c *gin.Context) {
 				read, readErr := io.ReadAll(c.Request.Body)
 				if readErr != nil {
 					c.Status(http.StatusBadRequest)
@@ -226,7 +228,7 @@ func TestExcelBPSImageAdmissionSmallBodyDoesNotHoldWorstCaseBudget(t *testing.T)
 }
 
 func TestExcelBPSImageAdmissionConfiguredLimits(t *testing.T) {
-	settings := bpsImageTestSettings{enabled: true, bodyLimitMiB: 1, budgetMiB: 512, maxRequests: 1}
+	settings := bpsImageTestSettings{bodyLimitMiB: 1, budgetMiB: 512, maxRequests: 1}
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
 	var once sync.Once
@@ -269,7 +271,7 @@ func TestExcelBPSImageAdmissionConfiguredLimits(t *testing.T) {
 	require.Equal(t, http.StatusRequestEntityTooLarge, result.Code)
 }
 
-func TestExcelBPSImageAdmissionLimitsAndDisabled(t *testing.T) {
+func TestExcelBPSImageAdmissionLimitsWithOptionalRelay(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
 		settings bpsImageTestSettings
@@ -280,7 +282,7 @@ func TestExcelBPSImageAdmissionLimitsAndDisabled(t *testing.T) {
 	}{
 		{"oversized", bpsImageTestSettings{enabled: true}, 65 << 20, "body", 413, false},
 		{"settings unavailable", bpsImageTestSettings{err: errors.New("private database error")}, 4, "body", 503, false},
-		{"disabled", bpsImageTestSettings{}, 65 << 20, "body", 204, true},
+		{"relay disabled", bpsImageTestSettings{}, 65 << 20, "body", 413, false},
 		{"understated length", bpsImageTestSettings{enabled: true}, 1, "body", 413, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -315,6 +317,38 @@ func TestExcelBPSImageAdmissionReleaseIsIdempotent(t *testing.T) {
 	release.release()
 	require.Zero(t, budget.bytes)
 	require.Zero(t, budget.requests)
+}
+
+func TestExcelBPSImageAdmissionPreservesRouteAndPlatformScope(t *testing.T) {
+	for _, tt := range []struct {
+		name, method, path, platform string
+		status                       int
+	}{
+		{"openai", http.MethodPost, "/responses", service.PlatformOpenAI, 413},
+		{"composite", http.MethodPost, "/responses", service.PlatformComposite, 413},
+		{"anthropic", http.MethodPost, "/responses", service.PlatformAnthropic, 204},
+		{"gemini", http.MethodPost, "/responses", service.PlatformGemini, 204},
+		{"websocket", http.MethodGet, "/responses", service.PlatformOpenAI, 204},
+		{"other route", http.MethodPost, "/v1/images/generations", service.PlatformOpenAI, 204},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r := gin.New()
+			r.Use(func(c *gin.Context) {
+				c.Set(string(ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Platform: tt.platform}})
+				c.Next()
+			})
+			r.Use(ExcelBPSImageAdmission(bpsImageTestSettings{}, 256<<20))
+			r.Handle(tt.method, tt.path, func(c *gin.Context) { c.Status(http.StatusNoContent) })
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req.ContentLength = 65 << 20
+			var reads atomic.Int32
+			req.Body = &bpsImageCountingBody{reads: &reads, reader: strings.NewReader("body")}
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			require.Equal(t, tt.status, w.Code)
+			require.Zero(t, reads.Load())
+		})
+	}
 }
 
 func TestExcelBPSImageAdmissionReservationResize(t *testing.T) {
@@ -356,7 +390,7 @@ func TestExcelBPSImageAdmissionUnknownBodyStopsBeforeBudgetOverflow(t *testing.T
 func TestExcelBPSImageAdmissionReleasesAfterCancellation(t *testing.T) {
 	entered := make(chan struct{})
 	done := make(chan struct{})
-	r := bpsImageTestRouter(bpsImageTestSettings{enabled: true}, func(c *gin.Context) {
+	r := bpsImageTestRouter(bpsImageTestSettings{}, func(c *gin.Context) {
 		if c.GetHeader("Hold") == "true" {
 			close(entered)
 			<-c.Request.Context().Done()

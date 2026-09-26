@@ -97,14 +97,20 @@ func newExcelBPSRequest(ctx context.Context, body []byte, token, accountID strin
 	if err != nil {
 		return nil, err
 	}
-	req.Header = http.Header{
+	req.Header = excelBPSHeaders(token, accountID)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	return req, nil
+}
+
+func excelBPSHeaders(token, accountID string) http.Header {
+	return http.Header{
 		"Authorization": {"Bearer " + token}, "Chatgpt-Account-Id": {accountID}, "X-Openai-Account-Id": {accountID},
-		"X-Basispoints-Auth-Mode": {"chatgpt"}, "Content-Type": {"application/json"}, "Accept": {"text/event-stream"},
-		"Origin": {"https://bps.openai.com"}, "User-Agent": {"Mozilla/5.0"},
+		"X-Basispoints-Auth-Mode": {"chatgpt"},
+		"Origin":                  {"https://bps.openai.com"}, "User-Agent": {"Mozilla/5.0"},
 		"X-Openai-Internal-Basispoints-Client-Product":       {"basispoints-excel-plugin"},
 		"X-Openai-Internal-Basispoints-Client-Agent-Profile": {"excel"},
 	}
-	return req, nil
 }
 
 // BPS deliberately bypasses Codex ticket/cookie injection and OAuth plugins:
@@ -185,14 +191,20 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 	if accountID == "" {
 		return fail(400, "basispoints_account_id_missing", "Excel BPS requires chatgpt_account_id")
 	}
+	proxyURL := ""
+	if account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+	attachments := &excelBPSAttachments{service: s, account: account, token: token, accountID: accountID, proxyURL: proxyURL}
+	defer attachments.cleanup(ctx)
+	upstreamBody, err = attachments.prepare(ctx, upstreamBody)
+	if err != nil {
+		return fail(502, "basispoints_image_upload_failed", "Excel BPS image upload failed; request was not replayed")
+	}
 	requestCtx := WithHTTPUpstreamRedirectsDisabled(WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileLongStream))
 	req, err := newExcelBPSRequest(requestCtx, upstreamBody, token, accountID)
 	if err != nil {
 		return nil, err
-	}
-	proxyURL := ""
-	if account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
 	}
 	SetActualOpenAIUpstreamEndpoint(c, "/basispoints/api/responses")
 	SetOpsUpstreamModel(c, model)
@@ -215,7 +227,7 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		upstreamMessage := fmt.Sprintf("Excel BPS returned HTTP %d", resp.StatusCode)
 		upstreamDetail := ""
 		if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
-			safeBody := excelBPSSanitizeErrorBody(string(raw), token, account)
+			safeBody := excelBPSSanitizeErrorBody(string(raw), token, account, attachments.ids...)
 			maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
 			if maxBytes <= 0 {
 				maxBytes = 2048
@@ -278,6 +290,13 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 		if strings.HasPrefix(line, "data: ") {
 			payload := []byte(strings.TrimPrefix(line, "data: "))
 			kind := gjson.GetBytes(payload, "type").String()
+			if kind == "response.failed" || kind == "response.incomplete" || kind == "error" {
+				payload, err = excelBPSSanitizeStreamError(payload, token, account, attachments.ids...)
+				if err != nil {
+					return fail(502, "basispoints_protocol_error", "Excel BPS error response is invalid")
+				}
+				line = "data: " + string(payload)
+			}
 			s.parseSSEUsageBytes(payload, &result.Usage)
 			if cacheCreationAsInput {
 				payload, err = excelBPSDownstreamUsage(payload)
@@ -345,12 +364,42 @@ func (s *OpenAIGatewayService) forwardExcelBPS(ctx context.Context, c *gin.Conte
 var excelBPSBearerPattern = regexp.MustCompile(`(?i)\bBearer\s+[^\s"',;<>]+`)
 var excelBPSURLCredentialsPattern = regexp.MustCompile(`(https?://)[^/\s@]+@`)
 var excelBPSImageCapabilityPattern = regexp.MustCompile(`/api/bps-images/[A-Za-z0-9_-]+`)
+var excelBPSInlineImagePattern = regexp.MustCompile(`(?i)data:image/[a-z0-9.+-]+;base64,[a-z0-9+/=\r\n]*`)
 
-func excelBPSSanitizeErrorBody(raw, token string, account *Account) string {
+func excelBPSSanitizeStreamError(payload []byte, token string, account *Account, attachmentIDs ...string) ([]byte, error) {
+	for _, path := range []string{"error", "response.error"} {
+		value := gjson.GetBytes(payload, path)
+		if !value.Exists() {
+			continue
+		}
+		safe := excelBPSSanitizeErrorBody(`{"error":`+value.Raw+`}`, token, account, attachmentIDs...)
+		var err error
+		payload, err = sjson.SetRawBytes(payload, path, []byte(gjson.Get(safe, "error").Raw))
+		if err != nil {
+			return nil, err
+		}
+	}
+	if gjson.GetBytes(payload, "type").String() == "error" {
+		safe := excelBPSSanitizeErrorBody(`{"error":`+string(payload)+`}`, token, account, attachmentIDs...)
+		for _, key := range []string{"message", "code", "param"} {
+			if value := gjson.Get(safe, "error."+key); value.Exists() {
+				var err error
+				payload, err = sjson.SetBytes(payload, key, value.String())
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	return payload, nil
+}
+
+func excelBPSSanitizeErrorBody(raw, token string, account *Account, attachmentIDs ...string) string {
 	if !json.Valid([]byte(raw)) {
 		return ""
 	}
 	secrets := append([]string{token}, excelBPSAccountSecrets(account)...)
+	secrets = append(secrets, attachmentIDs...)
 	fields := make(map[string]string)
 	for _, key := range []string{"message", "code", "type", "param"} {
 		value := gjson.Get(raw, "error."+key)
@@ -366,6 +415,7 @@ func excelBPSSanitizeErrorBody(raw, token string, account *Account) string {
 		clean = excelBPSBearerPattern.ReplaceAllString(clean, "Bearer [redacted]")
 		clean = excelBPSURLCredentialsPattern.ReplaceAllString(clean, "${1}[redacted]@")
 		clean = excelBPSImageCapabilityPattern.ReplaceAllString(clean, "/api/bps-images/[redacted]")
+		clean = excelBPSInlineImagePattern.ReplaceAllString(clean, "[redacted image]")
 		clean = sanitizeUpstreamErrorMessage(clean)
 		fields[key] = truncateString(logredact.RedactText(clean, "authorization", "api_key", "apikey", "token", "secret", "key", "cookie", "ticket", "recovery_ticket"), 2048)
 	}

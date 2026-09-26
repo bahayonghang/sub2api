@@ -7386,7 +7386,15 @@
               <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.settings.features.excelBpsImages.baseUrlHint') }}
               </p>
-              <div class="mt-5 grid gap-4 sm:grid-cols-3">
+              <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.settings.features.excelBpsImages.retentionHint') }}
+              </p>
+            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.settings.features.excelBpsImages.imageLimitsHint') }}
+            </p>
+            <div>
+              <div class="grid gap-4 sm:grid-cols-3">
                 <div class="space-y-1">
                   <label for="excel-bps-image-body-limit" class="input-label">{{ t('admin.settings.features.excelBpsImages.bodyLimit') }}</label>
                   <input id="excel-bps-image-body-limit" v-model.number="form.excel_bps_image_body_limit_mib" class="input" type="number" min="1" max="128" step="1" required />
@@ -7402,9 +7410,6 @@
               </div>
               <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.settings.features.excelBpsImages.budgetHint') }}
-              </p>
-              <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.settings.features.excelBpsImages.retentionHint') }}
               </p>
               <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.settings.features.excelBpsImages.capacityHint') }}

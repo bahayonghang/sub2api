@@ -291,7 +291,7 @@ func (b *Bridge) rebuildNativeHistoryCall(item object) (object, error) {
 	}, nil
 }
 
-func (b *Bridge) translateHistory(input []any) ([]any, error) {
+func (b *Bridge) translateHistory(input []any, images *requestImages) ([]any, error) {
 	result := make([]any, 0, len(input))
 	seenCalls := make(map[string]bool)
 	var trigger any
@@ -338,7 +338,7 @@ func (b *Bridge) translateHistory(input []any) ([]any, error) {
 				seenCalls[id] = true
 			}
 			item["type"] = "function_call_output"
-			if err := validateHistoryContent(item["output"], index, "output"); err != nil {
+			if err := validateHistoryContent(item["output"], index, "output", images); err != nil {
 				return nil, err
 			}
 			// Codex custom results carry ctco_ IDs. After lowering to a function
@@ -354,7 +354,7 @@ func (b *Bridge) translateHistory(input []any) ([]any, error) {
 		case "configuration_update":
 			return nil, fmt.Errorf("basispoints does not support configuration_update; start a new request with the desired effort")
 		}
-		if err := validateHistoryContent(item["content"], index, "content"); err != nil {
+		if err := validateHistoryContent(item["content"], index, "content", images); err != nil {
 			return nil, err
 		}
 		result = append(result, item)

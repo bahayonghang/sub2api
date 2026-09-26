@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -15,10 +16,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type bpsImageAdmissionRouteRepo struct{ service.SettingRepository }
+type bpsImageAdmissionRouteRepo struct {
+	service.SettingRepository
+	relayEnabled bool
+}
 
-func (*bpsImageAdmissionRouteRepo) GetMultiple(context.Context, []string) (map[string]string, error) {
-	return map[string]string{service.SettingKeyExcelBPSImageRelayEnabled: "true", service.SettingKeyExcelBPSImageBaseURL: "https://images.example"}, nil
+func (r *bpsImageAdmissionRouteRepo) GetMultiple(context.Context, []string) (map[string]string, error) {
+	return map[string]string{service.SettingKeyExcelBPSImageRelayEnabled: strconv.FormatBool(r.relayEnabled), service.SettingKeyExcelBPSImageBaseURL: "https://images.example"}, nil
 }
 
 type bpsImageUnreadBody struct{ read bool }
@@ -27,11 +31,22 @@ func (b *bpsImageUnreadBody) Read([]byte) (int, error) { b.read = true; return 0
 func (*bpsImageUnreadBody) Close() error               { return nil }
 
 func TestExcelBPSImageAdmissionCoversGatewayAliasesBeforeBodyRead(t *testing.T) {
+	for _, relayEnabled := range []bool{false, true} {
+		for _, platform := range []string{service.PlatformOpenAI, service.PlatformComposite} {
+			t.Run(platform+"/relay="+strconv.FormatBool(relayEnabled), func(t *testing.T) {
+				testBPSImageAdmissionGatewayAliases(t, relayEnabled, platform)
+			})
+		}
+	}
+}
+
+func testBPSImageAdmissionGatewayAliases(t *testing.T, relayEnabled bool, platform string) {
+	t.Helper()
 	cfg := &config.Config{Gateway: config.GatewayConfig{MaxBodySize: 256 << 20, TextMaxBodySize: 32 << 20}}
-	settings := service.NewSettingService(&bpsImageAdmissionRouteRepo{}, cfg)
+	settings := service.NewSettingService(&bpsImageAdmissionRouteRepo{relayEnabled: relayEnabled}, cfg)
 	r := gin.New()
 	RegisterGatewayRoutes(r, &handler.Handlers{OpenAIGateway: &handler.OpenAIGatewayHandler{}, Gateway: &handler.GatewayHandler{}}, func(c *gin.Context) {
-		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Platform: service.PlatformOpenAI}})
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{Group: &service.Group{Platform: platform}})
 		c.Next()
 	}, nil, nil, nil, settings, nil, cfg)
 	for _, path := range []string{"/responses", "/responses/compact", "/v1/responses", "/v1/responses/compact", "/backend-api/codex/responses", "/backend-api/codex/responses/compact", "/v1/chat/completions", "/chat/completions", "/v1/messages"} {

@@ -132,7 +132,8 @@ func Prepare(raw []byte, scope string, replay *ReplayCache) ([]byte, *Bridge, er
 	default:
 		return nil, nil, fmt.Errorf("basispoints input must be text or a Responses item array")
 	}
-	translated, err := b.translateHistory(input)
+	images := &requestImages{}
+	translated, err := b.translateHistory(input, images)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -206,6 +207,8 @@ func Prepare(raw []byte, scope string, replay *ReplayCache) ([]byte, *Bridge, er
 	if management, ok := source["context_management"].([]any); ok {
 		output["context_management"] = management
 	}
+	// Keep task and turn identifiers based on the original image references.
+	images.normalize()
 	body, err := json.Marshal(output)
 	return body, b, err
 }

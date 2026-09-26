@@ -100,7 +100,7 @@ func (r *bpsImageReservation) release() {
 	})
 }
 
-var errBPSImageRequestBusy = errors.New("image relay request capacity is busy")
+var errBPSImageRequestBusy = errors.New("BPS image request capacity is busy")
 
 type bpsImageBudgetedBody struct {
 	io.ReadCloser
@@ -126,9 +126,9 @@ func (b *bpsImageBudgetedBody) Read(p []byte) (int, error) {
 }
 
 // ExcelBPSImageAdmission must be shared across the gateway route aliases.
-// Account selection occurs after reading JSON, so enabling image relay applies
-// this guard to OpenAI/Composite Responses, Chat and Messages HTTP requests,
-// including text-only requests. Disabled relay leaves existing limits intact.
+// Account selection occurs after reading JSON, so this guard applies to
+// OpenAI/Composite Responses, Chat and Messages HTTP requests, including
+// text-only requests, regardless of the optional HTTPS relay setting.
 func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax int64) gin.HandlerFunc {
 	budget := &bpsImageAdmissionBudget{}
 	return func(c *gin.Context) {
@@ -143,11 +143,7 @@ func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax 
 		}
 		relay, err := settings.GetExcelBPSImageRelaySettings(c.Request.Context())
 		if err != nil {
-			bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_settings_unavailable", "Image relay settings are unavailable")
-			return
-		}
-		if !relay.Enabled {
-			c.Next()
+			bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_settings_unavailable", "BPS image settings are unavailable")
 			return
 		}
 		bodyLimitMiB, budgetMiB, maxRequests := relay.BodyLimitMiB, relay.BudgetMiB, relay.MaxRequests
@@ -170,7 +166,7 @@ func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax 
 		}
 		length := c.Request.ContentLength
 		if length > maxBody {
-			bpsImageAdmissionError(c, http.StatusRequestEntityTooLarge, "basispoints_image_body_too_large", "Request body exceeds the image relay ingress limit")
+			bpsImageAdmissionError(c, http.StatusRequestEntityTooLarge, "basispoints_image_body_too_large", "Request body exceeds the BPS image ingress limit")
 			return
 		}
 		readLimit := maxBody
@@ -192,7 +188,7 @@ func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax 
 		}
 		reservation, acquired := budget.acquire(accounted * bpsImageBodyMultiplier)
 		if !acquired {
-			bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_request_busy", "Image relay request capacity is busy; retry later")
+			bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_request_busy", "BPS image request capacity is busy; retry later")
 			return
 		}
 		defer reservation.release()
@@ -206,11 +202,11 @@ func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax 
 			if err != nil {
 				switch {
 				case errors.Is(err, errBPSImageRequestBusy):
-					bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_request_busy", "Image relay request capacity is busy; retry later")
+					bpsImageAdmissionError(c, http.StatusServiceUnavailable, "basispoints_image_request_busy", "BPS image request capacity is busy; retry later")
 				default:
 					var maxErr *http.MaxBytesError
 					if errors.As(err, &maxErr) {
-						bpsImageAdmissionError(c, http.StatusRequestEntityTooLarge, "basispoints_image_body_too_large", "Request body exceeds the image relay ingress limit")
+						bpsImageAdmissionError(c, http.StatusRequestEntityTooLarge, "basispoints_image_body_too_large", "Request body exceeds the BPS image ingress limit")
 					} else {
 						c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": "Failed to read request body"}})
 					}
@@ -219,7 +215,7 @@ func ExcelBPSImageAdmission(settings excelBPSImageSettingsReader, configuredMax 
 			}
 			actual := int64(len(body))
 			if actual > maxBody {
-				bpsImageAdmissionError(c, http.StatusRequestEntityTooLarge, "basispoints_image_body_too_large", "Request body exceeds the image relay ingress limit")
+				bpsImageAdmissionError(c, http.StatusRequestEntityTooLarge, "basispoints_image_body_too_large", "Request body exceeds the BPS image ingress limit")
 				return
 			}
 			if actual < bpsImageMinBodyBytes {

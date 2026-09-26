@@ -2,18 +2,18 @@ package basispoints
 
 import "fmt"
 
-func validateHistoryContent(value any, inputIndex int, field string) error {
+func validateHistoryContent(value any, inputIndex int, field string, images *requestImages) error {
 	content, _ := value.([]any)
 	for index, rawPart := range content {
 		part, _ := rawPart.(object)
 		switch text(part["type"]) {
 		case "input_text", "output_text", "text", "refusal":
 		case "input_image":
-			if err := validateImage(part); err != nil {
+			if err := images.validate(part); err != nil {
 				return fmt.Errorf("%w (path=input[%d].%s[%d])", err, inputIndex, field, index)
 			}
 		default:
-			return fmt.Errorf("basispoints supports text and HTTPS input_image content only (path=input[%d].%s[%d]; type=%s)", inputIndex, field, index, contentTypeDiagnostic(part))
+			return fmt.Errorf("basispoints supports text and input_image content only (path=input[%d].%s[%d]; type=%s)", inputIndex, field, index, contentTypeDiagnostic(part))
 		}
 	}
 	return nil

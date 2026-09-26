@@ -1,0 +1,65 @@
+{
+  "exit_code": 0,
+  "results": [
+    {
+      "answer": "Red, Blue",
+      "case": "user_image",
+      "http_status": 200,
+      "model": "gpt-6-astra",
+      "terminal": "response.completed",
+      "upstream_statuses": {
+        "delete": [
+          200
+        ],
+        "responses": [
+          200
+        ],
+        "upload": [
+          200
+        ]
+      }
+    },
+    {
+      "answer": "Red, blue",
+      "case": "tool_image_stream",
+      "http_status": 200,
+      "model": "gpt-6-astra",
+      "terminal": "response.completed",
+      "upstream_statuses": {
+        "responses": [
+          200
+        ]
+      }
+    },
+    {
+      "answer": "Red, blue",
+      "case": "user_history",
+      "http_status": 200,
+      "model": "gpt-6-astra",
+      "terminal": "response.completed",
+      "upstream_statuses": {
+        "delete": [
+          200
+        ],
+        "responses": [
+          200
+        ],
+        "upload": [
+          200
+        ]
+      }
+    },
+    {
+      "answer": "Red, blue",
+      "case": "tool_history",
+      "http_status": 200,
+      "model": "gpt-6-astra",
+      "terminal": "response.completed",
+      "upstream_statuses": {
+        "responses": [
+          200
+        ]
+      }
+    }
+  ]
+}

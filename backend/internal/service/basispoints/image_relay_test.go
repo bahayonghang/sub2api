@@ -137,7 +137,7 @@ func TestImageRelayDisabledAndHTTPSPassthrough(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, raw, out)
 	_, _, err = Prepare(out, "scope", nil)
-	require.ErrorContains(t, err, "HTTPS image URL")
+	require.NoError(t, err)
 	r, err := newTestImageRelay(t, "https://images.example")
 	require.NoError(t, err)
 	raw = []byte(`{ "model":"gpt-6-astra", "input":[{"role":"user","content":[{"type":"input_image","image_url":"https://cdn.example/image.png?sig=a%2Fb"}]}] }`)
@@ -163,7 +163,12 @@ func TestImageRelaySupportedFormats(t *testing.T) {
 	webp, err := base64.StdEncoding.DecodeString("UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA")
 	require.NoError(t, err)
 	for mimeType, data := range map[string][]byte{"image/png": relayTestPNG(t), "image/jpeg": jpg.Bytes(), "image/gif": gifBytes.Bytes(), "image/webp": webp} {
-		decoded, contentType, err := decodeTestRelayImage(t, "data:"+mimeType+";base64,"+base64.StdEncoding.EncodeToString(data))
+		raw := "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
+		decoded, contentType, err := decodeTestRelayImage(t, raw)
+		require.NoError(t, err, mimeType)
+		require.Equal(t, mimeType, contentType)
+		require.Equal(t, data, decoded)
+		decoded, contentType, err = DecodeInlineImage(raw)
 		require.NoError(t, err, mimeType)
 		require.Equal(t, mimeType, contentType)
 		require.Equal(t, data, decoded)
@@ -177,6 +182,9 @@ func TestImageRelayRejectsUnsafeOrOversizedData(t *testing.T) {
 	binary.BigEndian.PutUint32(bigDimensions[20:24], 9000)
 	binary.BigEndian.PutUint32(bigDimensions[29:33], crc32.ChecksumIEEE(bigDimensions[12:29]))
 	for _, raw := range []string{
+		"",
+		"data",
+		"file:///private/image.png",
 		"data:image/png,no-base64-marker",
 		"data:image/png;base64,",
 		"data:image/png;base64,PRIVATE_INVALID_PAYLOAD",
@@ -189,6 +197,9 @@ func TestImageRelayRejectsUnsafeOrOversizedData(t *testing.T) {
 		"data:image/png;base64," + strings.Repeat("A", base64.StdEncoding.EncodedLen(imageRelayMaxImageBytes)+1),
 	} {
 		_, _, err := decodeTestRelayImage(t, raw)
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "PRIVATE_INVALID_PAYLOAD")
+		_, _, err = DecodeInlineImage(raw)
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), "PRIVATE_INVALID_PAYLOAD")
 	}
