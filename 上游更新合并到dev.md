@@ -24,7 +24,7 @@
 | 上游仓库 | `https://github.com/ranxi2001/sub2api.git` |
 | 上游分支 | `production` |
 | 本地上游引用 | `refs/remotes/ranxi2001/production` |
-| 运行目录 | `D:\Downloads\sub2api_2.8.14_windows_amd64\deploy` |
+| 运行目录 | `D:\Documents\Code\Agents\sub2api\local-deploy` |
 | 运行镜像 | `sub2api:local` |
 | 宿主机端口 | `8081`，容器内 `8080` |
 
@@ -127,7 +127,7 @@ Set-Location D:\Documents\Code\Agents\sub2api
 powershell -NoProfile -ExecutionPolicy Bypass -File .\redeploy-local.ps1
 ```
 
-脚本构建 `sub2api:local`，只重建应用容器。PostgreSQL 与 Redis 保持运行。`.env`、`data`、`postgres_data`、`redis_data` 保持原文件。缺少 `data\config.yaml` 或 `data\.installed` 时脚本停止，不执行首次安装。
+脚本构建 `sub2api:local`，只重建应用容器。PostgreSQL 与 Redis 保持运行。`local-deploy` 里的 `.env`、`data`、`postgres_data`、`redis_data` 保持原文件。缺少 `local-deploy\data\config.yaml` 或 `local-deploy\data\.installed` 时脚本停止，不执行首次安装。
 
 脚本可能在打印 `sub2api running healthy` 之后以退出码 1 结束。已发生过的原因是启动日志把警告写到标准错误，PowerShell 在收集 `docker logs` 时把它当成失败。容器已经健康时，用第 6 节补做脚本未完成的检查。
 
@@ -145,7 +145,7 @@ docker logs sub2api *> $env:TEMP\sub2api-redeploy.log
 Select-String -Path $env:TEMP\sub2api-redeploy.log -Pattern "Admin user created" -Quiet
 ```
 
-最后一条的结果应为 `False`。数据库用户名和库名取运行目录 `.env` 的 `POSTGRES_USER`、`POSTGRES_DB`，缺省都是 `sub2api`。
+最后一条的结果应为 `False`。数据库用户名和库名取 `local-deploy\.env` 的 `POSTGRES_USER`、`POSTGRES_DB`，缺省都是 `sub2api`。
 
 ```powershell
 docker exec sub2api-postgres psql -U sub2api -d sub2api -tAc "SELECT 'users=' || COUNT(*) FROM users;"
