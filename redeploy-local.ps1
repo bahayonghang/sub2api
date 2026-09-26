@@ -5,6 +5,7 @@
 
 .DESCRIPTION
     默认动作会构建 sub2api:local，并只重建应用容器。
+    运行目录是仓库内的 local-deploy。Compose 文件使用 deploy\docker-compose.local.yml。
     宿主机端口保持 8081。已有 .env、data、postgres_data、redis_data 保持原文件。
     数据目录缺少 config.yaml 或 .installed 时直接停止，不执行首次安装。
 
@@ -31,7 +32,8 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
 }
 
 $SourceRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$DeployDir = 'D:\Downloads\sub2api_2.8.14_windows_amd64\deploy'
+$DeployDir = Join-Path $SourceRoot 'local-deploy'
+$ComposeFile = Join-Path $SourceRoot 'deploy\docker-compose.local.yml'
 $ImageName = 'sub2api:local'
 $HostPort = 8081
 $ContainerPort = 8080
@@ -71,7 +73,7 @@ function Get-EnvValues {
 function Assert-ExistingDeployment {
     $required = @(
         (Join-Path $DeployDir '.env'),
-        (Join-Path $DeployDir 'docker-compose.local.yml'),
+        $ComposeFile,
         (Join-Path $DeployDir 'data\config.yaml'),
         (Join-Path $DeployDir 'data\.installed'),
         (Join-Path $DeployDir 'postgres_data'),
@@ -175,10 +177,9 @@ function Invoke-Compose {
         [Parameter(Mandatory = $true)]
         [string[]]$ComposeArgs
     )
-    $composeFile = Join-Path $DeployDir 'docker-compose.local.yml'
     $overrideFile = Join-Path $DeployDir 'docker-compose.local-image.yml'
     Invoke-Native {
-        docker compose --project-directory $DeployDir -f $composeFile -f $overrideFile @ComposeArgs
+        docker compose --project-directory $DeployDir -f $ComposeFile -f $overrideFile @ComposeArgs
     }
 }
 
@@ -233,6 +234,30 @@ function Assert-RedeployResult {
     }
     if ($counts -match 'users=0') {
         throw 'users 表行数为 0'
+    }
+
+    $rootMarker = [System.IO.Path]::GetFileName($DeployDir)
+    foreach ($name in @('sub2api', 'sub2api-postgres', 'sub2api-redis')) {
+        $sources = docker inspect $name --format '{{range .Mounts}}{{.Source}}{{println}}{{end}}'
+        if ($LASTEXITCODE -ne 0) {
+            throw "无法读取 $name 的挂载"
+        }
+        $mounted = @($sources -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        if ($mounted.Count -eq 0) {
+            throw "$name 没有挂载"
+        }
+        $inside = $false
+        foreach ($source in $mounted) {
+            if ($source -match 'sub2api_2\.8\.14') {
+                throw "$name 仍挂载旧发布目录：$source"
+            }
+            if ($source -match [regex]::Escape($rootMarker)) {
+                $inside = $true
+            }
+        }
+        if (-not $inside) {
+            throw "$name 没有挂载运行目录"
+        }
     }
 
     $lan = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
