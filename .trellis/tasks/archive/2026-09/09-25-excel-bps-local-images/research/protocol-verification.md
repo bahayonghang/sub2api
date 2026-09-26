@@ -56,7 +56,7 @@
 - user_history：HTTP 200，response.completed，Red, blue；重传历史用户图片，附件上传和删除各返回 200。
 - tool_history：HTTP 200，response.completed，Red, blue；未调用上传。
 
-四个场景通过，视觉请求耗时合计 20.95 秒。复核命令：python -X utf8 .trellis/tasks/09-25-excel-bps-local-images/research/probe_bps_adapter.py --run。脚本按需安装临时测试源，凭据仅传入子进程环境，执行后删除临时测试源。结果见 adapter-probe-results.json，源见 adapter-probe.go.txt。
+四个场景通过，视觉请求耗时合计 20.95 秒。复核命令：python -X utf8 .trellis/tasks/archive/2026-09/09-25-excel-bps-local-images/research/probe_bps_adapter.py --run。脚本按需安装临时测试源，凭据仅传入子进程环境，执行后删除临时测试源。结果见 adapter-probe-results.json，源见 adapter-probe.go.txt。
 
 ## 外部依据
 
